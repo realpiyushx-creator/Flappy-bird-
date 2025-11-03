@@ -1,0 +1,322 @@
+<!doctype html>
+
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Flappy — Black Glass Aesthetic</title>
+  <style>
+    :root{
+      --w: 360px; /* base width (responsive) */
+    }
+    html,body{height:100%;margin:0;background:#000;}
+    body{
+      display:flex;align-items:center;justify-content:center;gap:16px;
+      font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
+      -webkit-font-smoothing:antialiased;color:#fff;
+      background: radial-gradient(1200px 500px at 10% 10%, rgba(255,255,255,0.02), transparent),
+                  linear-gradient(180deg,#000 0%, #050505 100%);
+      padding:24px;
+      box-sizing:border-box;
+    }.frame{
+  width:var(--w);max-width:95vw;position:relative;
+  border-radius:18px;overflow:visible;
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+  border:1px solid rgba(255,255,255,0.04);
+  box-shadow: 0 10px 40px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.02);
+  padding:14px;backdrop-filter: blur(8px);
+}
+
+canvas{display:block;border-radius:12px;width:100%;height:auto;background:transparent;}
+
+.hud{position:absolute;left:50%;transform:translateX(-50%);top:18px;z-index:6;text-align:center;
+    font-weight:600;letter-spacing:1px;font-size:18px;color:#e6f7ff;text-shadow:0 6px 20px rgba(0,0,0,0.6);
+    -webkit-text-stroke: 0.3px rgba(0,0,0,0.25);
+}
+
+.credit{position:absolute;right:10px;bottom:8px;z-index:8;font-size:12px;padding:6px 8px;border-radius:10px;
+    background:linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
+    border:1px solid rgba(255,255,255,0.04);backdrop-filter: blur(6px);opacity:0.95;color:#fff;
+    display:flex;gap:8px;align-items:center;font-weight:600;
+}
+
+.overlay{
+  position:absolute;left:50%;transform:translateX(-50%);top:50%;transform:translate(-50%,-50%);
+  width:86%;z-index:9;padding:18px;border-radius:14px;text-align:center;color:#ffffffcc;
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+  border:1px solid rgba(255,255,255,0.03);backdrop-filter: blur(8px);
+}
+
+.btn{display:inline-block;margin-top:12px;padding:10px 16px;border-radius:10px;cursor:pointer;font-weight:700;
+     border:1px solid rgba(255,255,255,0.06);background:rgba(255,255,255,0.02);
+}
+
+.small{font-size:12px;color:#ddd;opacity:0.9}
+
+footer{position:fixed;left:0;right:0;bottom:8px;text-align:center;font-size:12px;color:#ffffff22}
+
+@media (min-width:700px){:root{--w:420px;}}
+
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <div class="hud" id="hud">Tap / Space to start</div>
+    <canvas id="game"></canvas>
+    <div class="credit">@tuff.piyush</div>
+    <div id="overlay" class="overlay" style="display:none"></div>
+  </div>  <script>
+  // Flappy Bird — Black Glass aesthetic
+  (()=>{
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+
+    // base resolution
+    let W = 360, H = 640;
+
+    function fitCanvas(){
+      const rect = canvas.getBoundingClientRect();
+      // maintain aspect ratio 9:16 (W:H)
+      const aspectW = rect.width;
+      const desiredH = Math.round(aspectW * (H / W));
+      canvas.style.height = desiredH + 'px';
+      canvas.width = Math.round(rect.width * pixelRatio);
+      canvas.height = Math.round(desiredH * pixelRatio);
+      ctx.setTransform(pixelRatio,0,0,pixelRatio,0,0);
+    }
+
+    // initial fit after DOM
+    requestAnimationFrame(fitCanvas);
+    window.addEventListener('resize', fitCanvas);
+
+    // game state
+    const state = { mode: 'menu', score:0, high:0 };
+
+    // bird
+    const bird = { x:80, y:200, r:16, vel:0, gravity:0.6, lift:-10, rot:0 };
+
+    // pipes
+    const pipes = [];
+    const pipeW = 64; 
+    const gapMin = 120, gapMax = 185;
+    let spawnTimer = 0;
+    const spawnInterval = 90; // frames
+    const speedBase = 2.6;
+
+    function reset(){
+      bird.y = 200; bird.vel = 0; bird.rot = 0;
+      pipes.length = 0; state.score = 0; spawnTimer = 0; state.mode='menu';
+      hud.textContent = 'Tap / Space to start';
+      showOverlay(false);
+    }
+
+    function startGame(){
+      pipes.length = 0; state.score = 0; spawnTimer = 0; state.mode='playing';
+      hud.textContent = '';
+      showOverlay(false);
+    }
+
+    function gameOver(){
+      state.mode='over';
+      hud.textContent = '';
+      state.high = Math.max(state.high, state.score);
+      showOverlay(true, `<div style=\"font-size:20px;font-weight:800;color:#fff\">Game Over</div><div style=\"margin-top:8px;font-size:14px;color:#ddd\">Score: ${state.score} — High: ${state.high}</div><div style=\"margin-top:12px\"><button class=\"btn\" id=\"restart\">Restart</button></div>`);
+      document.getElementById('restart').addEventListener('click', ()=>{startGame();});
+    }
+
+    // HUD element
+    const hud = document.getElementById('hud');
+    const overlay = document.getElementById('overlay');
+    function showOverlay(show, html){
+      if(!show){overlay.style.display='none';overlay.innerHTML='';return}
+      overlay.style.display='block'; overlay.innerHTML = html || '<div style="font-size:18px;font-weight:800;color:#fff">Flappy — Black Glass</div><div class="small" style="margin-top:8px">Tap / Space to flap • Avoid pipes</div><div style="margin-top:12px"><button class="btn" id="playbtn">Play</button></div>';
+      const pb = document.getElementById('playbtn'); if(pb) pb.addEventListener('click', ()=>{startGame();});
+    }
+
+    // create initial menu overlay
+    showOverlay(true);
+
+    // pipes management
+    function addPipe(){
+      const gap = gapMin + Math.random()*(gapMax-gapMin);
+      const topH = 40 + Math.random()*(H - gap - 160);
+      const x = (canvas.width / pixelRatio) + pipeW + 20;
+      pipes.push({x, topH, gap, passed:false});
+    }
+
+    function update(){
+      if(state.mode === 'playing'){
+        // physics
+        bird.vel += bird.gravity; bird.y += bird.vel;
+        bird.vel *= 0.99; // small drag
+        bird.rot = Math.max(Math.min(bird.vel*4, 45), -25);
+
+        // spawn
+        spawnTimer++;
+        if(spawnTimer > spawnInterval){ addPipe(); spawnTimer = 0; }
+
+        // move pipes
+        const s = speedBase + Math.min(2, state.score*0.06);
+        for(let i=pipes.length-1;i>=0;i--){
+          pipes[i].x -= s;
+          // score
+          if(!pipes[i].passed && pipes[i].x + pipeW < bird.x){ pipes[i].passed = true; state.score++; }
+          // offscreen
+          if(pipes[i].x + pipeW < -20) pipes.splice(i,1);
+        }
+
+        // collisions
+        if(bird.y - bird.r < 0 || bird.y + bird.r > (canvas.height/pixelRatio)){
+          gameOver();
+        }
+        for(const p of pipes){
+          const bx = bird.x, by = bird.y, br = bird.r;
+          // top rect
+          if(bx + br > p.x && bx - br < p.x + pipeW){
+            if(by - br < p.topH || by + br > p.topH + p.gap){
+              gameOver();
+            }
+          }
+        }
+      }
+    }
+
+    function flap(){
+      if(state.mode === 'menu'){ startGame(); bird.vel = bird.lift; }
+      else if(state.mode === 'playing'){ bird.vel = bird.lift; }
+      else if(state.mode === 'over'){ reset(); }
+    }
+
+    // input
+    window.addEventListener('keydown', (e)=>{ if(e.code==='Space') { e.preventDefault(); flap(); } });
+    window.addEventListener('mousedown', (e)=>{ flap(); });
+    window.addEventListener('touchstart', (e)=>{ flap(); });
+
+    // drawing helpers
+    function drawBackground(){
+      const w = canvas.width/pixelRatio, h = canvas.height/pixelRatio;
+      // subtle gradient
+      const g = ctx.createLinearGradient(0,0,0,h);
+      g.addColorStop(0,'rgba(255,255,255,0.02)'); g.addColorStop(1,'rgba(255,255,255,0.01)');
+      ctx.fillStyle = g; ctx.fillRect(0,0,w,h);
+
+      // faint vertical glass streaks
+      for(let i=0;i<6;i++){
+        const x = (w/6)*i + (Math.sin(perf.now()/1200 + i)*10);
+        ctx.fillStyle = 'rgba(255,255,255,0.01)'; ctx.fillRect(x,0,8,h);
+      }
+
+      // ground glow
+      ctx.fillStyle = 'rgba(255,255,255,0.02)'; ctx.fillRect(0,h-40,w,40);
+    }
+
+    function drawBird(){
+      // glassy orb
+      const x = bird.x, y = bird.y, r = bird.r;
+      const g = ctx.createRadialGradient(x - r*0.4, y - r*0.6, r*0.2, x, y, r);
+      g.addColorStop(0,'rgba(255,255,255,0.95)');
+      g.addColorStop(0.1,'rgba(200,230,255,0.8)');
+      g.addColorStop(0.5,'rgba(140,200,230,0.35)');
+      g.addColorStop(1,'rgba(20,30,40,0.15)');
+
+      ctx.save();
+      ctx.translate(x,y);
+      ctx.rotate(bird.rot * Math.PI/180);
+      ctx.translate(-x,-y);
+
+      ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fillStyle = g; ctx.fill();
+      // rim
+      ctx.lineWidth = 1.2; ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.stroke();
+      // highlight
+      ctx.beginPath(); ctx.ellipse(x - r*0.3, y - r*0.45, r*0.4, r*0.25, -0.6, 0, Math.PI*2);
+      ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.fill();
+
+      // eye (cool little pupil)
+      ctx.beginPath(); ctx.arc(x + r*0.15, y - r*0.05, r*0.22, 0, Math.PI*2);
+      ctx.fillStyle = 'rgba(6,10,14,0.9)'; ctx.fill();
+      ctx.beginPath(); ctx.arc(x + r*0.17, y - r*0.09, r*0.08, 0, Math.PI*2);
+      ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.fill();
+
+      ctx.restore();
+    }
+
+    function drawPipe(p){
+      const x = p.x, top = p.topH, gap = p.gap; const w = pipeW; const h = canvas.height/pixelRatio;
+      // top pipe
+      ctx.save();
+      // glass color
+      ctx.fillStyle = 'rgba(30,200,210,0.12)';
+      ctx.fillRect(x,0,w,top);
+      // glass highlight
+      ctx.fillStyle = 'rgba(255,255,255,0.04)';
+      ctx.fillRect(x+6,6,w-12,Math.max(8,top-12));
+
+      // cap rounded
+      ctx.beginPath(); ctx.moveTo(x+w, top); ctx.lineTo(x+w, Math.min(top+18,h));
+      ctx.fillStyle = 'rgba(14,100,110,0.2)'; ctx.fill();
+      ctx.restore();
+
+      // bottom pipe
+      ctx.save();
+      ctx.fillStyle = 'rgba(30,200,210,0.12)';
+      ctx.fillRect(x,top+gap,w,h-top-gap);
+      ctx.fillStyle = 'rgba(255,255,255,0.04)';
+      ctx.fillRect(x+6, top+gap + 6, w-12, Math.max(8, h-top-gap-12));
+      ctx.restore();
+
+      // subtle shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.2)'; ctx.fillRect(x+4, (top+gap)-6, w-8, 6);
+    }
+
+    function drawScore(){
+      const s = state.score;
+      ctx.save();
+      ctx.font = '700 36px Inter, system-ui'; ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(230,247,255,0.92)'; ctx.fillText(s, (canvas.width/pixelRatio)/2, 60);
+      ctx.restore();
+    }
+
+    function loop(){
+      update();
+      // clear
+      ctx.clearRect(0,0,canvas.width/pixelRatio, canvas.height/pixelRatio);
+      drawBackground();
+      // pipes
+      for(const p of pipes) drawPipe(p);
+      // bird
+      drawBird();
+      if(state.mode==='playing') drawScore();
+
+      requestAnimationFrame(loop);
+    }
+
+    // initial canvas sizing: set canvas container ratio
+    function initCanvasSize(){
+      const containerW = document.querySelector('.frame').clientWidth - 28; // padding
+      const desiredH = Math.round(containerW * (H/W));
+      canvas.style.width = containerW + 'px';
+      canvas.style.height = desiredH + 'px';
+      canvas.width = Math.round(containerW * pixelRatio);
+      canvas.height = Math.round(desiredH * pixelRatio);
+      ctx.setTransform(pixelRatio,0,0,pixelRatio,0,0);
+    }
+
+    initCanvasSize();
+    window.addEventListener('resize', initCanvasSize);
+
+    loop();
+
+    // expose some things for debugging
+    window._flappy = { reset, startGame, gameOver, state };
+
+    // small UX: pause animations when hidden
+    document.addEventListener('visibilitychange', ()=>{
+      if(document.hidden){ /* could pause */ }
+    });
+
+    // small touch hint
+    hud.textContent = 'Tap / Space to flap';
+  })();
+  </script></body>
+  </html>
